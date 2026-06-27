@@ -27,10 +27,15 @@ def _get_engine():
     # Railway Postgres URLs use postgres:// — SQLAlchemy 2.x needs postgresql://
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
-    # Add SSL for remote DBs
-    if "sslmode" not in url and "localhost" not in url and "127.0.0.1" not in url:
+
+    # Add SSL + connect_timeout for remote DBs (Supabase, Railway Postgres, etc.)
+    if "localhost" not in url and "127.0.0.1" not in url:
         sep = "&" if "?" in url else "?"
-        url += f"{sep}sslmode=require"
+        if "sslmode" not in url:
+            url += f"{sep}sslmode=require"
+            sep = "&"
+        if "connect_timeout" not in url:
+            url += f"{sep}connect_timeout=10"
 
     _engine = create_engine(
         url,
@@ -38,6 +43,7 @@ def _get_engine():
         max_overflow=5,
         pool_pre_ping=True,
         pool_recycle=300,
+        connect_args={"connect_timeout": 10},
         echo=False,
     )
     _SessionLocal = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
