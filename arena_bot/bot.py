@@ -196,39 +196,71 @@ async def on_message(message: discord.Message):
     # ── Owner fast-path (Krishna) — no cooldown, no restrictions ─────────────
     if user_id_str == OWNER_ID:
         lower = content.lower()
+        bot_mentioned = bot.user in message.mentions
 
-        # Pattern: "ping @user N times" / "mention @user N times"
-        ping_match = re.search(
-            r'\b(?:ping|mention|tag)\b.{0,40}?(<@!?\d+>).{0,20}?(\d+)\s*times?',
-            lower
-        )
-        # Pattern: "send [msg] N times" / "say [msg] N times" / "repeat [msg] N times"
-        repeat_match = re.search(
-            r'\b(?:send|say|repeat|write)\b\s+(.+?)\s+(\d+)\s*times?\s*$',
-            content,
-            re.IGNORECASE | re.DOTALL
-        )
+        # ── Check if this is a repeat/ping command ─────────────────────────
+        is_ping_cmd = bool(re.search(r'\b(?:ping|mention|tag)\b', lower))
+        is_send_cmd = bool(re.search(r'\b(?:send|say|repeat|write)\b', lower))
+        is_owner_cmd = is_ping_cmd or is_send_cmd
 
-        if ping_match:
-            # Extract the real mention from original content (not lowered)
-            mention_search = re.search(r'<@!?\d+>', content)
-            mention = mention_search.group(0) if mention_search else ping_match.group(1)
-            count = min(int(ping_match.group(2)), 20)   # cap at 20 — Discord rate limits
-            for _ in range(count):
-                await message.channel.send(mention)
-                await asyncio.sleep(0.6)
+        if is_owner_cmd:
+            # --- Parse count: "N times" OR "every N sec/min for X sec/min" ---
+            interval_m = re.search(r'every\s+(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?)', lower)
+            duration_m = re.search(r'for\s+(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?)', lower)
+            times_m    = re.search(r'(\d+)\s*times?', lower)
+
+            if interval_m and duration_m:
+                iv = int(interval_m.group(1))
+                iv_sec = iv * 60 if 'min' in interval_m.group(2) else iv
+                iv_sec = max(1, iv_sec)
+                dv = int(duration_m.group(1))
+                dv_sec = dv * 60 if 'min' in duration_m.group(2) else dv
+                count    = min(int(dv_sec / iv_sec), 200)
+                interval = iv_sec
+            elif times_m:
+                count    = min(int(times_m.group(1)), 200)
+                interval = 0.6
+            else:
+                count    = 1
+                interval = 0.6
+
+            # --- Resolve the target (Discord mention OR username) ---
+            mention_in_msg = re.search(r'<@!?\d+>', content)
+            if mention_in_msg:
+                target = mention_in_msg.group(0)
+            elif is_ping_cmd:
+                # Try to find by username/display name
+                name_m = re.search(r'\b(?:ping|mention|tag)\b\s+@?(\S+)', lower)
+                if name_m:
+                    uname = name_m.group(1).strip('.,!?')
+                    member = discord.utils.find(
+                        lambda m: m.name.lower() == uname or m.display_name.lower() == uname,
+                        message.guild.members
+                    )
+                    target = f"<@{member.id}>" if member else f"@{uname}"
+                else:
+                    target = None
+            else:
+                # send/say/repeat — extract the message text
+                send_m = re.search(
+                    r'\b(?:send|say|repeat|write)\b\s+"?(.+?)"?\s*(?:\d+\s*times?|every\s|for\s|$)',
+                    content, re.IGNORECASE
+                )
+                target = send_m.group(1).strip() if send_m else None
+
+            if target:
+                for i in range(count):
+                    await message.channel.send(target)
+                    if i < count - 1:
+                        await asyncio.sleep(interval)
             return
 
-        if repeat_match:
-            msg_text = repeat_match.group(1).strip('"\'')
-            count = min(int(repeat_match.group(2)), 20)
-            for _ in range(count):
-                await message.channel.send(msg_text)
-                await asyncio.sleep(0.6)
+        # ── Not a command — only reply via AI if in bot channel OR mentioned ──
+        if not bot_mentioned and (not bot_channel_id or channel_id_str != bot_channel_id):
+            # Owner is just chatting with someone else — stay silent
+            await bot.process_commands(message)
             return
 
-        # Not a repeat command — skip cooldown and jump straight to AI answer
-        # (works in any channel: arena channel → get_answer, elsewhere → get_mention_answer)
         async with message.channel.typing():
             try:
                 if bot_channel_id and channel_id_str == bot_channel_id:
