@@ -1,6 +1,3 @@
-[build]
-builder = "NIXPACKS"
-
 [deploy]
 startCommand = "python arena_bot/main.py"
 restartPolicyType = "ON_FAILURE"
