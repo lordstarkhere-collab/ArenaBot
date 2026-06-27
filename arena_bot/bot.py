@@ -187,6 +187,12 @@ async def on_message(message: discord.Message):
     if not content:
         return
 
+    # ── Fetch stored channel IDs (needed by both owner fast-path and normal flow)
+    with get_session() as session:
+        settings = session.query(GuildSettings).filter_by(guild_id=guild_id_str).first()
+        bot_channel_id = settings.bot_channel_id if settings else None
+        training_channel_id = settings.training_channel_id if settings else None
+
     # ── Owner fast-path (Krishna) — no cooldown, no restrictions ─────────────
     if user_id_str == OWNER_ID:
         lower = content.lower()
@@ -268,12 +274,6 @@ async def on_message(message: discord.Message):
         stale = [uid for uid, ts in _cooldowns.items() if now_prune - ts > COOLDOWN_SECONDS * 10]
         for uid in stale:
             del _cooldowns[uid]
-
-    # ── Fetch stored channel IDs ──
-    with get_session() as session:
-        settings = session.query(GuildSettings).filter_by(guild_id=guild_id_str).first()
-        bot_channel_id = settings.bot_channel_id if settings else None
-        training_channel_id = settings.training_channel_id if settings else None
 
     # ── Moderation check — runs on every message, every channel ───────────────
     # Skip: training channel (privileged-only), privileged users themselves
