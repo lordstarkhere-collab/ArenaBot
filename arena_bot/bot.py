@@ -596,6 +596,45 @@ async def cmd_status(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+@tree.command(name="pingloop", description="[Owner] Ping someone at a set interval for a set duration")
+@app_commands.describe(
+    user="Who to ping",
+    interval_sec="How many seconds between each ping (e.g. 3)",
+    duration_min="How many minutes to keep pinging (e.g. 5)",
+)
+async def cmd_pingloop(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    interval_sec: int,
+    duration_min: int,
+):
+    if str(interaction.user.id) != OWNER_ID:
+        await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    interval_sec = max(1, min(interval_sec, 300))
+    duration_min = max(1, min(duration_min, 60))
+    total_pings  = int((duration_min * 60) / interval_sec)
+    total_pings  = min(total_pings, 200)
+
+    await interaction.response.send_message(
+        f"📣 Pinging {user.mention} every **{interval_sec}s** for **{duration_min} min** "
+        f"({total_pings} pings total). Starting now…",
+        ephemeral=False,
+    )
+
+    async def _run():
+        for i in range(total_pings):
+            try:
+                await interaction.channel.send(user.mention)
+            except discord.Forbidden:
+                break
+            if i < total_pings - 1:
+                await asyncio.sleep(interval_sec)
+
+    asyncio.create_task(_run())
+
+
 @tree.command(name="about", description="About ArenaBot")
 async def cmd_about(interaction: discord.Interaction):
     embed = discord.Embed(
