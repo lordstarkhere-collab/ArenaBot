@@ -24,6 +24,7 @@ COOLDOWN_SECONDS = 8
 _cooldowns: dict[str, float] = {}
 _COOLDOWN_PRUNE_EVERY = 500   # prune stale entries every N messages
 _msg_counter = 0
+_pingloop_tasks: dict[int, asyncio.Task] = {}   # guild_id → running pingloop task
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -619,20 +620,42 @@ async def cmd_pingloop(
 
     await interaction.response.send_message(
         f"📣 Pinging {user.mention} every **{interval_sec}s** for **{duration_min} min** "
-        f"({total_pings} pings total). Starting now…",
+        f"({total_pings} pings total). Use `/pingstop` to cancel.",
         ephemeral=False,
     )
 
-    async def _run():
-        for i in range(total_pings):
-            try:
-                await interaction.channel.send(user.mention)
-            except discord.Forbidden:
-                break
-            if i < total_pings - 1:
-                await asyncio.sleep(interval_sec)
+    guild_id = interaction.guild_id
 
-    asyncio.create_task(_run())
+    async def _run():
+        try:
+            for i in range(total_pings):
+                await interaction.channel.send(user.mention)
+                if i < total_pings - 1:
+                    await asyncio.sleep(interval_sec)
+            await interaction.channel.send(f"✅ Ping loop for {user.mention} finished.")
+        except asyncio.CancelledError:
+            await interaction.channel.send(f"🛑 Ping loop for {user.mention} was stopped.")
+        except discord.Forbidden:
+            pass
+        finally:
+            _pingloop_tasks.pop(guild_id, None)
+
+    task = asyncio.create_task(_run())
+    _pingloop_tasks[guild_id] = task
+
+
+@tree.command(name="pingstop", description="[Owner] Stop the currently running ping loop")
+async def cmd_pingstop(interaction: discord.Interaction):
+    if str(interaction.user.id) != OWNER_ID:
+        await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
+        return
+
+    task = _pingloop_tasks.get(interaction.guild_id)
+    if task and not task.done():
+        task.cancel()
+        await interaction.response.send_message("🛑 Stopping the ping loop…", ephemeral=False)
+    else:
+        await interaction.response.send_message("No ping loop is running right now.", ephemeral=True)
 
 
 @tree.command(name="about", description="About ArenaBot")
