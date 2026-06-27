@@ -185,6 +185,79 @@ async def on_message(message: discord.Message):
     if not content:
         return
 
+    # ── Owner fast-path (Krishna) — no cooldown, no restrictions ─────────────
+    if user_id_str == OWNER_ID:
+        lower = content.lower()
+
+        # Pattern: "ping @user N times" / "mention @user N times"
+        ping_match = re.search(
+            r'\b(?:ping|mention|tag)\b.{0,40}?(<@!?\d+>).{0,20}?(\d+)\s*times?',
+            lower
+        )
+        # Pattern: "send [msg] N times" / "say [msg] N times" / "repeat [msg] N times"
+        repeat_match = re.search(
+            r'\b(?:send|say|repeat|write)\b\s+(.+?)\s+(\d+)\s*times?\s*$',
+            content,
+            re.IGNORECASE | re.DOTALL
+        )
+
+        if ping_match:
+            # Extract the real mention from original content (not lowered)
+            mention_search = re.search(r'<@!?\d+>', content)
+            mention = mention_search.group(0) if mention_search else ping_match.group(1)
+            count = min(int(ping_match.group(2)), 20)   # cap at 20 — Discord rate limits
+            for _ in range(count):
+                await message.channel.send(mention)
+                await asyncio.sleep(0.6)
+            return
+
+        if repeat_match:
+            msg_text = repeat_match.group(1).strip('"\'')
+            count = min(int(repeat_match.group(2)), 20)
+            for _ in range(count):
+                await message.channel.send(msg_text)
+                await asyncio.sleep(0.6)
+            return
+
+        # Not a repeat command — skip cooldown and jump straight to AI answer
+        # (works in any channel: arena channel → get_answer, elsewhere → get_mention_answer)
+        async with message.channel.typing():
+            try:
+                if bot_channel_id and channel_id_str == bot_channel_id:
+                    with get_session() as session:
+                        answer = await get_answer(
+                            question=content,
+                            session=session,
+                            guild_id=guild_id_str,
+                            channel_id=channel_id_str,
+                            user_id=user_id_str,
+                        )
+                else:
+                    clean = content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip() or content
+                    with get_session() as session:
+                        answer = await get_mention_answer(
+                            question=clean,
+                            session=session,
+                            guild_id=guild_id_str,
+                            channel_id=channel_id_str,
+                            user_id=user_id_str,
+                            username=message.author.display_name,
+                            channel_name=message.channel.name,
+                        )
+                if len(answer) <= 1900:
+                    await message.reply(answer)
+                else:
+                    parts = [answer[i:i+1900] for i in range(0, len(answer), 1900)]
+                    for i, part in enumerate(parts):
+                        if i == 0:
+                            await message.reply(part)
+                        else:
+                            await message.channel.send(part)
+            except Exception as e:
+                logger.error(f"[Owner fast-path] {e}", exc_info=True)
+                await message.reply("Something went wrong, try again!")
+        return
+
     # ── Prune stale cooldown entries every 500 messages ───────────────────────
     global _msg_counter
     _msg_counter += 1
