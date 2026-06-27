@@ -157,14 +157,17 @@ async def _send_welcome(channel: discord.TextChannel):
 @bot.event
 async def on_ready():
     logger.info(f"✅ ArenaBot online as {bot.user} (ID: {bot.user.id})")
-    try:
-        await tree.sync()
-        logger.info("Slash commands synced")
-    except Exception as e:
-        logger.warning(f"Slash command sync failed: {e}")
+    # Sync to each guild instantly (guild sync = immediate, global sync = up to 1 hour)
+    synced_total = 0
     for guild in bot.guilds:
+        try:
+            tree.copy_global_to(guild=guild)
+            await tree.sync(guild=guild)
+            synced_total += 1
+        except Exception as e:
+            logger.warning(f"Slash command sync failed for {guild.name}: {e}")
         await setup_bot_channel(guild)
-    logger.info(f"ArenaBot ready in {len(bot.guilds)} server(s)")
+    logger.info(f"ArenaBot ready — slash commands synced to {synced_total} server(s)")
 
 
 @bot.event
