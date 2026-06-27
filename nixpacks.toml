@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+cmds = ["pip install -r arena_bot/requirements.txt"]
+
+[start]
+cmd = "python arena_bot/main.py"
